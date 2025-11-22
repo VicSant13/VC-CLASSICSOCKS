@@ -1,0 +1,186 @@
+:root {
+    --bg-dark: #110b29;
+    /* Deep Purple Background */
+    --bg-card: #240046;
+    /* Darker Purple for Cards */
+    --text-main: #ffffff;
+    --accent-purple: #3a0ca3;
+    /* Primary Buttons */
+    --accent-pink: #f72585;
+    /* Action Buttons / Highlights */
+    --accent-cyan: #4cc9f0;
+    /* Info / Secondary */
+    --accent-yellow: #ffd60a;
+    /* Warnings / Badges */
+}
+
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Navbar */
+.navbar {
+    background-color: var(--bg-card) !important;
+    border-bottom: 2px solid var(--accent-pink);
+}
+
+.navbar-brand {
+    color: var(--accent-cyan) !important;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.nav-link {
+    color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.nav-link:hover,
+.nav-link.active {
+    color: var(--accent-cyan) !important;
+}
+
+/* Cards */
+.card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--accent-purple);
+    color: var(--text-main);
+}
+
+.card-header {
+    background-color: rgba(58, 12, 163, 0.5) !important;
+    /* Semi-transparent purple */
+    color: var(--text-main);
+    border-bottom: 1px solid var(--accent-purple);
+}
+
+.card-footer {
+    background-color: rgba(0, 0, 0, 0.2) !important;
+    border-top: 1px solid var(--accent-purple);
+}
+
+/* Buttons */
+.btn-primary {
+    background-color: var(--accent-purple);
+    border-color: var(--accent-purple);
+}
+
+.btn-primary:hover {
+    background-color: #480ca8;
+    border-color: #480ca8;
+}
+
+.btn-success {
+    background-color: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+    color: #000;
+    font-weight: bold;
+}
+
+.btn-success:hover {
+    background-color: #4895ef;
+    border-color: #4895ef;
+    color: #000;
+}
+
+.btn-danger {
+    background-color: var(--accent-pink);
+    border-color: var(--accent-pink);
+}
+
+.btn-danger:hover {
+    background-color: #b5179e;
+    border-color: #b5179e;
+}
+
+.btn-outline-danger {
+    color: var(--accent-pink);
+    border-color: var(--accent-pink);
+}
+
+.btn-outline-danger:hover {
+    background-color: var(--accent-pink);
+    color: white;
+}
+
+/* Form Inputs */
+.form-control,
+.form-select {
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--accent-purple);
+    color: var(--text-main);
+}
+
+.form-control:focus,
+.form-select:focus {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-main);
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 0 0.25rem rgba(76, 201, 240, 0.25);
+}
+
+.form-control::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+    background-color: rgba(0, 0, 0, 0.3);
+    color: rgba(255, 255, 255, 0.7);
+    border-color: var(--accent-purple);
+    opacity: 1;
+    /* Override bootstrap opacity */
+}
+
+/* Tables */
+.table {
+    color: var(--text-main) !important;
+    --bs-table-color: var(--text-main);
+    --bs-table-bg: transparent;
+    --bs-table-border-color: var(--accent-purple);
+}
+
+.table> :not(caption)>*>* {
+    color: var(--text-main) !important;
+    background-color: transparent !important;
+    /* Ensure no white bg from bootstrap striped */
+}
+
+.table-light {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-main);
+}
+
+.list-group-item {
+    background-color: transparent;
+    color: var(--text-main);
+    border-color: var(--accent-purple);
+}
+
+/* Select Options Contrast */
+select option {
+    background-color: #fff;
+    color: #000;
+}
+
+/* Badges */
+.badge.bg-secondary {
+    background-color: #495057 !important;
+    color: #fff;
+}
+
+.badge.bg-success {
+    background-color: var(--accent-cyan) !important;
+    color: #000;
+}
+
+/* Text Utilities */
+.text-muted {
+    color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.text-success {
+    color: var(--accent-cyan) !important;
+}

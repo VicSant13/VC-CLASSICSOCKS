@@ -34,8 +34,8 @@ $entities = [
     ],
     'sales' => [
         'table' => 'sales',
-        'labels' => ['ID','Client Route','Client','Quantity','Price','Observations','Date'],
-        'fields' => ['client_routes_id'=>'select','client'=>'text','quantity'=>'number','price'=>'number','observations'=>'textarea','date'=>'date']
+        'labels' => ['ID','Client Route','Client','Product','Quantity','Price','Observations','Date'],
+        'fields' => ['client_routes_id'=>'select','client'=>'text','product_id'=>'select','quantity'=>'number','price'=>'number','observations'=>'textarea','date'=>'date']
     ],
     'orders' => [
         'table' => 'orders',
@@ -83,26 +83,26 @@ if ($role === 'salesman' && !in_array($entity, $allowed_salesman)) {
 $action = $_GET['action'] ?? 'list';
 
 // AJAX Handler for saving sales
+// AJAX Handler for saving sales
 if ($action === 'save_ajax' && $entity === 'sales_visual') {
     header('Content-Type: application/json');
     $input = json_decode(file_get_contents('php://input'), true);
     
     $clientId = $input['client_id'] ?? null;
     $routeId = $input['route_id'] ?? null;
+    $productId = $input['product_id'] ?? null;
     $qty = $input['quantity'] ?? 0;
     $price = $input['price'] ?? 0;
     $date = $input['date'] ?? date('Y-m-d');
     
-    if (!$clientId || !$routeId) {
+    if (!$clientId || !$routeId || !$productId) {
         echo json_encode(['success'=>false, 'message'=>'Missing ID']);
         exit;
     }
 
-    // Check if sale exists for this route/date
-    // We assume one sale per route per day for simplicity, or we just insert a new one.
-    // Let's check if there's a sale for this route_id on this date
-    $stmt = $pdo->prepare("SELECT id FROM sales WHERE client_routes_id = ? AND date = ? LIMIT 1");
-    $stmt->execute([$routeId, $date]);
+    // Check if sale exists for this route/date/product
+    $stmt = $pdo->prepare("SELECT id FROM sales WHERE client_routes_id = ? AND date = ? AND product_id = ? LIMIT 1");
+    $stmt->execute([$routeId, $date, $productId]);
     $existing = $stmt->fetch();
 
     if ($qty > 0) {
@@ -115,14 +115,14 @@ if ($action === 'save_ajax' && $entity === 'sales_visual') {
             $cStmt->execute([$clientId]);
             $cName = $cStmt->fetchColumn() ?: 'Unknown';
 
-            $ins = $pdo->prepare("INSERT INTO sales (client_routes_id, client, quantity, price, date, observations) VALUES (?, ?, ?, ?, ?, '')");
-            $ins->execute([$routeId, $cName, $qty, $price, $date]);
+            $ins = $pdo->prepare("INSERT INTO sales (client_routes_id, client, product_id, quantity, price, date, observations) VALUES (?, ?, ?, ?, ?, ?, '')");
+            $ins->execute([$routeId, $cName, $productId, $qty, $price, $date]);
         }
     } else {
-        // If qty is 0, maybe delete the sale? Or just set to 0. Let's set to 0.
+        // If qty is 0, delete the sale
         if ($existing) {
-             $upd = $pdo->prepare("UPDATE sales SET quantity = 0 WHERE id = ?");
-             $upd->execute([$existing['id']]);
+             $del = $pdo->prepare("DELETE FROM sales WHERE id = ?");
+             $del->execute([$existing['id']]);
         }
     }
 
@@ -278,7 +278,6 @@ if ($action === 'list') {
     } elseif ($entity === 'sales_visual') {
         // Visual Sales View
         $days = ['LUNES','MARTES','MIERCOLES','JUEVES','VIERNES','SABADO'];
-        // Default to today's day name in Spanish
         $mapDays = [
             'Mon' => 'LUNES', 'Tue' => 'MARTES', 'Wed' => 'MIERCOLES',
             'Thu' => 'JUEVES', 'Fri' => 'VIERNES', 'Sat' => 'SABADO', 'Sun' => 'LUNES'
@@ -286,130 +285,210 @@ if ($action === 'list') {
         $todayEng = date('D');
         $defaultDay = $mapDays[$todayEng] ?? 'LUNES';
         
-        $selectedDay = $_GET['day'] ?? $defaultDay;
-        $selectedDate = $_GET['date'] ?? date('Y-m-d'); // Default to today
+        $selectedDate = $_GET['date'] ?? date('Y-m-d');
+        
+        // Calculate Day from Date
+        $timestamp = strtotime($selectedDate);
+        $dayEng = date('D', $timestamp);
+        $selectedDay = $mapDays[$dayEng] ?? 'LUNES';
+
+        // Role check
+        $role = $_SESSION['role'] ?? 'salesman';
+        $dateReadonly = ($role === 'salesman') ? 'readonly' : '';
+        $dayDisabled = 'disabled'; // Always disabled as it is auto-calculated
+
+        // Fetch active products
+        $products = $pdo->query("SELECT id, name FROM products WHERE active = 1 ORDER BY name ASC")->fetchAll();
 
         // Filter form
         echo "<form class=\"row g-3 mb-4 align-items-end\">";
         echo "<input type=\"hidden\" name=\"entity\" value=\"sales_visual\">";
+        // We need to pass the day as hidden if disabled, but actually we calculate it on server side anyway.
+        // But for UI consistency let's keep the select disabled.
         echo "<div class=\"col-auto\">";
         echo "<label class=\"form-label\">Día de Ruta</label>";
-        echo "<select name=\"day\" class=\"form-select\" onchange=\"this.form.submit()\">";
+        echo "<select name=\"day_display\" class=\"form-select\" disabled>";
         foreach ($days as $d) {
             $sel = ($d === $selectedDay) ? 'selected' : '';
             echo "<option value=\"{$d}\" {$sel}>{$d}</option>";
         }
         echo "</select>";
+        // Hidden input for day is not strictly needed if we calculate it from date, but let's be safe? 
+        // Actually we calculate $selectedDay from $selectedDate at the top, so we don't need to submit 'day'.
         echo "</div>";
         echo "<div class=\"col-auto\">";
         echo "<label class=\"form-label\">Fecha de Venta</label>";
-        echo "<input type=\"date\" name=\"date\" class=\"form-control\" value=\"{$selectedDate}\" onchange=\"this.form.submit()\">";
+        echo "<input type=\"date\" name=\"date\" class=\"form-control\" value=\"{$selectedDate}\" onchange=\"this.form.submit()\" {$dateReadonly}>";
         echo "</div>";
         echo "</form>";
 
-        // Get routes for this day
-        // Join with clients to get names
-        // Join with sales to get existing values for the selected date
+        // Get routes and sales
         $sql = "SELECT cr.id as route_id, cr.client_id, cr.visit_order, c.name as client_name, 
-                       s.quantity, s.price, s.id as sale_id
+                       s.quantity, s.price, s.id as sale_id, s.product_id, p.name as product_name
                 FROM client_routes cr 
                 JOIN clients c ON cr.client_id = c.id 
                 LEFT JOIN sales s ON s.client_routes_id = cr.id AND s.date = ?
+                LEFT JOIN products p ON s.product_id = p.id
                 WHERE cr.day = ? AND cr.active = 1
-                ORDER BY cr.visit_order ASC";
+                ORDER BY cr.visit_order ASC, s.id ASC";
         
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$selectedDate, $selectedDay]);
-        $routes = $stmt->fetchAll();
+        $rows = $stmt->fetchAll();
 
-        echo "<div class=\"card shadow-sm\">";
-        echo "<div class=\"card-header bg-white\"><h3 class=\"mb-0 text-center\">Sales - " . e($selectedDay) . "</h3></div>";
-        echo "<div class=\"card-body p-0\">";
-        echo "<div class=\"table-responsive\">";
-        echo "<table class=\"table table-hover mb-0 align-middle\">";
-        echo "<thead class=\"table-light\"><tr>";
-        echo "<th>Day</th><th>Client</th><th style=\"width:100px\">Qty</th><th style=\"width:100px\">Price</th><th>Total</th><th style=\"width:50px\"></th>";
-        echo "</tr></thead>";
-        echo "<tbody>";
+        // Group by route
+        $routes = [];
+        foreach ($rows as $r) {
+            $rid = $r['route_id'];
+            if (!isset($routes[$rid])) {
+                $routes[$rid] = [
+                    'route_id' => $rid,
+                    'client_id' => $r['client_id'],
+                    'client_name' => $r['client_name'],
+                    'visit_order' => $r['visit_order'],
+                    'sales' => []
+                ];
+            }
+            if ($r['sale_id']) {
+                $routes[$rid]['sales'][] = $r;
+            }
+        }
+
+        echo "<div class=\"row\">"; // Main container for cards
 
         $grandTotal = 0;
         $grandTotalQty = 0;
 
         foreach ($routes as $r) {
-            $qty = $r['quantity'] ?? '';
-            $price = $r['price'] ?? ''; // Default price? Could fetch from price_list if empty
+            echo "<div class=\"col-12 col-lg-6 mb-4\" data-route-id=\"{$r['route_id']}\" data-client-id=\"{$r['client_id']}\">";
+            echo "<div class=\"card shadow-sm h-100\">";
             
-            // If no price set, try to find a default price from price_list? 
-            // For now, let's leave it empty or 0 if not set. User can input.
-            // Or maybe default to 28 as in the sketch? Let's leave blank/0.
+            // Card Header
+            $badgeClass = !empty($r['sales']) ? 'bg-success' : 'bg-secondary';
+            echo "<div class=\"card-header d-flex justify-content-between align-items-center bg-light\">";
+            echo "<h5 class=\"mb-0 text-truncate\" title=\"" . e($r['client_name']) . "\">" . e($r['client_name']) . "</h5>";
+            echo "<span class=\"badge {$badgeClass}\">Order: " . e($r['visit_order']) . "</span>";
+            echo "</div>";
+
+            // Card Body: Existing Sales
+            echo "<div class=\"card-body p-0\">";
+            if (empty($r['sales'])) {
+                echo "<div class=\"p-3 text-muted text-center small\">No sales yet</div>";
+            } else {
+                echo "<ul class=\"list-group list-group-flush\">";
+                foreach ($r['sales'] as $sale) {
+                    $total = ((float)$sale['quantity']) * ((float)$sale['price']);
+                    $grandTotal += $total;
+                    $grandTotalQty += (float)$sale['quantity'];
+
+                    echo "<li class=\"list-group-item\">";
+                    echo "<div class=\"d-flex justify-content-between align-items-start\">";
+                    echo "<div>";
+                    echo "<div class=\"fw-bold\">" . e($sale['product_name'] ?: 'Unknown') . "</div>";
+                    echo "<small class=\"text-muted\">" . e($sale['quantity']) . " x $" . number_format($sale['price'], 2) . "</small>";
+                    echo "</div>";
+                    echo "<div class=\"text-end\">";
+                    echo "<div class=\"fw-bold text-success\">$" . number_format($total, 2) . "</div>";
+                    echo "<button class=\"btn btn-sm btn-link text-danger p-0 delete-btn\" data-sale-id=\"{$sale['sale_id']}\" data-product-id=\"{$sale['product_id']}\" style=\"text-decoration:none\">&times; Remove</button>";
+                    echo "</div>";
+                    echo "</div>";
+                    echo "</li>";
+                }
+                echo "</ul>";
+            }
+            echo "</div>";
+
+            // Card Footer: Add New Sale Form
+            echo "<div class=\"card-footer bg-white\">";
+            echo "<div class=\"row g-2 align-items-end\">";
             
-            $total = ((float)$qty) * ((float)$price);
-            $grandTotal += $total;
-            $grandTotalQty += (float)$qty;
+            // Product Select
+            echo "<div class=\"col-12\">";
+            echo "<label class=\"form-label small text-muted mb-1\">Product</label>";
+            echo "<select class=\"form-select form-select-sm product-select\">";
+            echo "<option value=\"\">Select Product...</option>";
+            foreach ($products as $p) {
+                echo "<option value=\"{$p['id']}\">" . e($p['name']) . "</option>";
+            }
+            echo "</select>";
+            echo "</div>";
+            
+            // Qty
+            echo "<div class=\"col-4\">";
+            echo "<label class=\"form-label small text-muted mb-1\">Qty</label>";
+            echo "<input type=\"number\" class=\"form-control form-control-sm qty-input\" placeholder=\"0\">";
+            echo "</div>";
+            
+            // Price
+            echo "<div class=\"col-4\">";
+            echo "<label class=\"form-label small text-muted mb-1\">Price</label>";
+            echo "<input type=\"number\" class=\"form-control form-control-sm price-input\" placeholder=\"0.00\">";
+            echo "</div>";
+            
+            // Add Button
+            echo "<div class=\"col-4\">";
+            echo "<button class=\"btn btn-sm btn-primary w-100 save-btn\">Add</button>";
+            echo "</div>";
+            
+            echo "</div>"; // end row
+            echo "</div>"; // end card-footer
 
-            $btnClass = ($r['sale_id'] ?? false) ? 'btn-success text-white' : 'btn-outline-success';
-
-            echo "<tr data-route-id=\"{$r['route_id']}\" data-client-id=\"{$r['client_id']}\">";
-            echo "<td>" . e($selectedDay) . "</td>";
-            echo "<td><strong>" . e($r['client_name']) . "</strong></td>";
-            echo "<td><input type=\"number\" class=\"form-control form-control-sm qty-input\" value=\"{$qty}\" placeholder=\"0\"></td>";
-            echo "<td><input type=\"number\" class=\"form-control form-control-sm price-input\" value=\"{$price}\" placeholder=\"0.00\"></td>";
-            echo "<td class=\"fw-bold row-total\">$" . number_format($total, 2) . "</td>";
-            echo "<td><button class=\"btn btn-sm {$btnClass} save-btn\"><span class=\"status-icon\">&#10003;</span></button></td>";
-            echo "</tr>";
+            echo "</div>"; // end card
+            echo "</div>"; // end col
         }
 
-        echo "</tbody>";
-        echo "<tfoot><tr>";
-        echo "<td colspan=\"4\" class=\"text-end fw-bold fs-5\">Total: <span class=\"text-primary ms-2\" id=\"grand-total-qty\">" . number_format($grandTotalQty) . " pzs</span></td>";
-        echo "<td colspan=\"2\" class=\"fw-bold fs-5 text-success\" id=\"grand-total\">$" . number_format($grandTotal, 2) . "</td>";
-        echo "</tr></tfoot>";
-        echo "</table>";
-        echo "</div></div></div>";
+        echo "</div>"; // end row
 
-        // JavaScript for interactivity
+        // Sticky Footer for Totals
+        echo "<div class=\"fixed-bottom bg-dark text-white p-2 shadow-lg\" style=\"z-index: 1030;\">";
+        echo "<div class=\"container d-flex justify-content-between align-items-center\">";
+        echo "<span class=\"fs-5\">Total:</span>";
+        echo "<div>";
+        echo "<span class=\"badge bg-primary fs-6 me-2\">" . number_format($grandTotalQty) . " pzs</span>";
+        echo "<span class=\"badge bg-success fs-6\">$" . number_format($grandTotal, 2) . "</span>";
+        echo "</div>";
+        echo "</div>";
+        echo "</div>";
+        // Add padding to body to prevent content being hidden behind fixed footer
+        echo "<div style=\"height: 60px;\"></div>";
+
+        // JavaScript
         echo "<script>
         document.addEventListener('DOMContentLoaded', function() {
             const date = '{$selectedDate}';
             
-            function updateTotals() {
-                let grand = 0;
-                let grandQty = 0;
-                document.querySelectorAll('tbody tr').forEach(row => {
-                    const qty = parseFloat(row.querySelector('.qty-input').value) || 0;
-                    const price = parseFloat(row.querySelector('.price-input').value) || 0;
-                    const total = qty * price;
-                    row.querySelector('.row-total').textContent = '$' + total.toFixed(2);
-                    grand += total;
-                    grandQty += qty;
-                });
-                document.getElementById('grand-total').textContent = '$' + grand.toFixed(2);
-                document.getElementById('grand-total-qty').textContent = grandQty + ' pzs';
-            }
-
-            document.querySelectorAll('.qty-input, .price-input').forEach(input => {
-                input.addEventListener('input', updateTotals);
-            });
-
             document.querySelectorAll('.save-btn').forEach(btn => {
                 btn.addEventListener('click', function() {
-                    const row = this.closest('tr');
-                    const routeId = row.dataset.routeId;
-                    const clientId = row.dataset.clientId;
-                    const qty = row.querySelector('.qty-input').value;
-                    const price = row.querySelector('.price-input').value;
-                    const btn = this;
+                    const card = this.closest('.col-12'); // The column wrapper has the data attributes
+                    const routeId = card.dataset.routeId;
+                    const clientId = card.dataset.clientId;
+                    
+                    const footer = this.closest('.card-footer');
+                    const productSelect = footer.querySelector('.product-select');
+                    const productId = productSelect.value;
+                    const qty = footer.querySelector('.qty-input').value;
+                    const price = footer.querySelector('.price-input').value;
+                    
+                    if (!productId || !qty) {
+                        alert('Please select a product and quantity');
+                        return;
+                    }
 
-                    // Visual feedback: saving...
-                    btn.classList.remove('btn-outline-success', 'btn-success', 'text-white');
-                    btn.classList.add('btn-outline-secondary');
+                    const btn = this;
+                    btn.disabled = true;
+                    btn.textContent = '...';
                     
                     fetch('?entity=sales_visual&action=save_ajax', {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': '{$_SESSION['csrf_token']}'
+                        },
                         body: JSON.stringify({
+                            csrf_token: '{$_SESSION['csrf_token']}',
                             route_id: routeId,
                             client_id: clientId,
+                            product_id: productId,
                             quantity: qty,
                             price: price,
                             date: date
@@ -418,11 +497,52 @@ if ($action === 'list') {
                     .then(res => res.json())
                     .then(data => {
                         if(data.success) {
-                            btn.classList.remove('btn-outline-secondary');
-                            btn.classList.add('btn-success', 'text-white');
-                            // Keep it green to show it is saved
+                            location.reload(); 
                         } else {
-                            alert('Error saving');
+                            alert('Error: ' + (data.message || 'Unknown'));
+                            btn.disabled = false;
+                            btn.textContent = 'Add';
+                        }
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        btn.disabled = false;
+                        btn.textContent = 'Add';
+                    });
+                });
+            });
+
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    if(!confirm('Delete this sale?')) return;
+                    
+                    const card = this.closest('.col-12');
+                    const routeId = card.dataset.routeId;
+                    const clientId = card.dataset.clientId;
+                    const productId = this.dataset.productId;
+                    
+                    fetch('?entity=sales_visual&action=save_ajax', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': '{$_SESSION['csrf_token']}'
+                        },
+                        body: JSON.stringify({
+                            csrf_token: '{$_SESSION['csrf_token']}',
+                            route_id: routeId,
+                            client_id: clientId,
+                            product_id: productId,
+                            quantity: 0, // Delete signal
+                            price: 0,
+                            date: date
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if(data.success) {
+                            location.reload();
+                        } else {
+                            alert('Error deleting');
                         }
                     })
                     .catch(err => console.error(err));
@@ -464,6 +584,65 @@ if ($action === 'list') {
         }
 
         echo "<h2>Estadísticas de Ventas</h2>";
+        
+        // Heatmap Data
+        $sqlHeat = "SELECT c.lat, c.lng, SUM(s.quantity * s.price) as total_sales
+                    FROM sales s
+                    JOIN client_routes cr ON s.client_routes_id = cr.id
+                    JOIN clients c ON cr.client_id = c.id
+                    WHERE c.lat IS NOT NULL AND c.lng IS NOT NULL AND c.lat <> '' AND c.lng <> ''
+                    GROUP BY c.id";
+        $stmtHeat = $pdo->query($sqlHeat);
+        $heatData = $stmtHeat->fetchAll();
+        
+        $heatPoints = [];
+        $maxVal = 0;
+        foreach ($heatData as $h) {
+            $val = (float)$h['total_sales'];
+            if ($val > $maxVal) $maxVal = $val;
+            $heatPoints[] = [(float)$h['lat'], (float)$h['lng'], $val];
+        }
+        $jsonHeat = json_encode($heatPoints);
+        $maxVal = $maxVal ?: 1; // Avoid div by zero
+
+        echo "<div class=\"card shadow-sm mb-4\">";
+        echo "<div class=\"card-header bg-white\"><h5>Mapa de Calor de Ventas</h5></div>";
+        echo "<div class=\"card-body p-0\">";
+        echo "<div id=\"heatMap\" style=\"height: 500px;\"></div>";
+        echo "</div></div>";
+
+        echo "<link rel=\"stylesheet\" href=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css\">";
+        echo "<script src=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js\"></script>";
+        echo "<script src=\"https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js\"></script>";
+        echo "<script>
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof L === 'undefined') return;
+            
+            const map = L.map('heatMap').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(map);
+
+            const points = {$jsonHeat};
+            if (points.length > 0) {
+                // Calculate bounds
+                const bounds = L.latLngBounds(points.map(p => [p[0], p[1]]));
+                map.fitBounds(bounds, {padding: [50, 50]});
+                
+                // Add heat layer
+                // We can normalize intensity or use max option. 
+                // Leaflet.heat expects [lat, lng, intensity]
+                L.heatLayer(points, {
+                    radius: 25,
+                    blur: 15,
+                    maxZoom: 10,
+                    max: {$maxVal}, // Maximum intensity value
+                    gradient: {0.4: 'blue', 0.65: 'lime', 1: 'red'}
+                }).addTo(map);
+            }
+        });
+        </script>";
         echo "<div class=\"card shadow-sm mb-4\">";
         echo "<div class=\"card-body\">";
         echo "<canvas id=\"salesChart\" style=\"max-height: 400px;\"></canvas>";
@@ -636,8 +815,13 @@ if ($action === 'list') {
                 }
             }
         }
-        echo "<td><a class=\"btn btn-sm btn-primary me-1\" href=\"?entity={$entity}&action=edit&id={$r['id']}\">Edit</a>";
-        echo "<a class=\"btn btn-sm btn-danger\" href=\"?entity={$entity}&action=delete&id={$r['id']}\" onclick=\"return confirm('Seguro?')\">Delete</a></td>";
+        echo "<td style=\"width:150px\">";
+        echo "<a class=\"btn btn-sm btn-primary me-1\" href=\"?entity={$entity}&action=edit&id={$r['id']}\">Edit</a>";
+        echo "<form method=\"post\" action=\"?entity={$entity}&action=delete&id={$r['id']}\" style=\"display:inline;\" onsubmit=\"return confirm('Seguro?');\">";
+        echo "<input type=\"hidden\" name=\"csrf_token\" value=\"{$_SESSION['csrf_token']}\">";
+        echo "<button type=\"submit\" class=\"btn btn-sm btn-danger\">Delete</button>";
+        echo "</form>";
+        echo "</td>";
         echo "</tr>";
     }
     echo "</tbody></table>";
@@ -662,6 +846,20 @@ if ($action === 'list') {
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        // CSRF Check
+        $token = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+        // For AJAX JSON requests, we might need to read from input or headers.
+        // The save_ajax uses JSON body, so we need to handle that.
+        
+        // Check if it's a JSON request
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+        if (strpos($contentType, 'application/json') !== false) {
+            $input = json_decode(file_get_contents('php://input'), true);
+            $token = $input['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+        }
+        
+        verify_csrf_token($token);
+
         // Build SQL dynamically
         $fields = $conf['fields'];
         $params = [];
@@ -735,6 +933,7 @@ if ($action === 'list') {
 
     echo "<h2>" . ($id ? "Editar" : "Crear") . " " . e($entity) . "</h2>";
     echo "<form method=\"post\">";
+    echo "<input type=\"hidden\" name=\"csrf_token\" value=\"{$_SESSION['csrf_token']}\">";
     foreach ($conf['fields'] as $f => $type) {
         $val = $data[$f] ?? '';
         echo "<div class=\"mb-3\">";
@@ -817,10 +1016,15 @@ if ($action === 'list') {
     echo "</form>";
 
 } elseif ($action === 'delete') {
-    $id = $_GET['id'] ?? null;
-    if ($id) {
-        $stmt = $pdo->prepare("DELETE FROM {$table} WHERE id = ?");
-        $stmt->execute([$id]);
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $token = $_POST['csrf_token'] ?? '';
+        verify_csrf_token($token);
+        
+        $id = $_GET['id'] ?? null;
+        if ($id) {
+            $stmt = $pdo->prepare("DELETE FROM {$table} WHERE id = ?");
+            $stmt->execute([$id]);
+        }
     }
     header("Location: ?entity={$entity}&action=list");
     exit;

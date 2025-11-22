@@ -6,7 +6,7 @@ $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $key = $_POST['key'] ?? '';
     // Check for Salesman
-    if ($key === 'salesman2025') {
+    if ($key === $config['salesman_key']) {
         $_SESSION['logged_in'] = true;
         $_SESSION['role'] = 'salesman';
         header('Location: /admin.php?entity=sales_visual');
@@ -30,24 +30,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Login - Classic Socks</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/assets/css/style.css" rel="stylesheet">
     <style>
-        body { background-color: #f5f5f5; display: flex; align-items: center; justify-content: center; height: 100vh; }
-        .login-card { width: 100%; max-width: 400px; padding: 2rem; background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        body { display: flex; align-items: center; justify-content: center; height: 100vh; }
     </style>
 </head>
 <body>
-    <div class="login-card">
-        <h3 class="text-center mb-4">Acceso Restringido</h3>
-        <?php if ($error): ?>
-            <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
-        <?php endif; ?>
-        <form method="post">
-            <div class="mb-3">
-                <label class="form-label">Clave Maestra</label>
-                <input type="password" name="key" class="form-control" required autofocus>
+    <div class="card shadow-lg p-4" style="max-width: 400px; width: 100%;">
+        <div class="card-body">
+            <div class="text-center mb-3">
+                <img src="/assets/img/logo.png" alt="Classic Socks Logo" style="max-width: 150px; height: auto;">
             </div>
-            <button type="submit" class="btn btn-primary w-100">Entrar</button>
-        </form>
+            <h3 class="text-center mb-4 text-white">Acceso Restringido</h3>
+            <?php if ($error): ?>
+                <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
+            <?php endif; ?>
+            <form method="post">
+                <div class="mb-3">
+                    <label class="form-label text-white">Clave Maestra</label>
+                    <input type="password" name="key" class="form-control" required autofocus>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Entrar</button>
+            </form>
+        </div>
     </div>
 </body>
 </html>
